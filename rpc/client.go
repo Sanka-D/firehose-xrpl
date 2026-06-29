@@ -10,6 +10,7 @@ import (
 	"time"
 
 	binarycodec "github.com/Peersyst/xrpl-go/binary-codec"
+	"github.com/Peersyst/xrpl-go/xrpl/hash"
 	"github.com/Peersyst/xrpl-go/xrpl/rpc"
 	"github.com/xrpl-commons/firehose-xrpl/types"
 	"go.uber.org/zap"
@@ -177,6 +178,17 @@ func (c *Client) GetLedger(ctx context.Context, ledgerIndex uint64) (*types.Ledg
 				// Get meta (rippled uses "meta" in binary mode)
 				if meta, ok := txMap["meta"].(string); ok {
 					ltx.Meta = meta
+				}
+			}
+
+			// In binary mode rippled does not return the transaction hash, so
+			// derive it from the signed tx_blob (txID = SHA-512Half of the
+			// transaction prefix + blob). Fall back gracefully on failure.
+			if ltx.Hash == "" && ltx.TxBlob != "" {
+				if txHash, err := hash.SignTxBlob(ltx.TxBlob); err != nil {
+					c.logger.Warn("failed to compute transaction hash from tx_blob", zap.Error(err))
+				} else {
+					ltx.Hash = txHash
 				}
 			}
 
