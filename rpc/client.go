@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	binarycodec "github.com/Peersyst/xrpl-go/binary-codec"
@@ -122,10 +123,18 @@ func (c *Client) GetLedger(ctx context.Context, ledgerIndex uint64) (*types.Ledg
 		}
 	}(resp.Body)
 
+	// Public endpoints often answer rate-limit / gateway errors with a non-2xx
+	// status and a plain-text or HTML body. Surface those clearly instead of
+	// letting the JSON decoder fail with an opaque "invalid character" error.
+	if resp.StatusCode != http.StatusOK {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("ledger request returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
+	}
+
 	// Stream JSON parsing - avoids buffering entire response in memory
 	var rawResp rawLedgerResponse
 	if err := json.NewDecoder(resp.Body).Decode(&rawResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+		return nil, fmt.Errorf("failed to parse response (status %d, content-type %q): %w", resp.StatusCode, resp.Header.Get("Content-Type"), err)
 	}
 
 	if rawResp.Result.Error != "" {
